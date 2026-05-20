@@ -1,0 +1,202 @@
+// Thread-safe shared state for the wallpaper extension.
+//
+// All access goes through `OSAllocatedUnfairLock`-protected accessors
+// so concurrent XPC callbacks don't race.
+
+import Foundation
+import os
+import QuartzCore
+
+struct ActiveWallpaper: @unchecked Sendable {
+    let caContext: AnyObject // CAContext (private class, hold as AnyObject)
+    let rootLayer: CALayer
+    let renderer: VideoRenderer?
+    let displayID: UInt32?
+    let videoID: String?
+}
+
+final class WallpaperState: Sendable {
+    static let shared = WallpaperState()
+
+    private static let selectedVideoKey = "selectedVideoID"
+
+    private struct State: @unchecked Sendable {
+        var activeContexts: [UInt32: ActiveWallpaper] = [:]
+        var wallpaperIDToContext: [String: UInt32] = [:]
+        var cachedThumbnailURL: URL?
+        var cacheDirectoryURL: URL?
+        var cachedVideoURL: URL?
+        var currentVideoID: String? = UserDefaults.standard.string(forKey: WallpaperState.selectedVideoKey)
+        var presentationMode: String = "active"
+        var activityState: String = "active"
+        var isDisplayAsleep: Bool = false
+        var isScreenLocked: Bool = false
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+
+    private init() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = Unmanaged.passUnretained(self).toOpaque()
+        CFNotificationCenterAddObserver(
+            center,
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let state = Unmanaged<WallpaperState>.fromOpaque(observer).takeUnretainedValue()
+                state.clearCaches()
+            },
+            "glass.kagerou.phosphene.libraryChanged" as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    /// Clear cached URLs so the next lookup re-evaluates against the current library.
+    private func clearCaches() {
+        lock.withLock { state in
+            state.cachedVideoURL = nil
+            state.cachedThumbnailURL = nil
+        }
+    }
+
+    // MARK: - Context Management
+
+    /// Store a new rendering context, stopping any existing renderer for the same wallpaperID.
+    func storeContext(_ context: ActiveWallpaper, id: UInt32, wallpaperID: String?) -> ActiveWallpaper? {
+        lock.withLock { state in
+            var existing: ActiveWallpaper?
+            if let wid = wallpaperID, let oldId = state.wallpaperIDToContext[wid] {
+                existing = state.activeContexts.removeValue(forKey: oldId)
+            }
+            state.activeContexts[id] = context
+            if let wid = wallpaperID {
+                state.wallpaperIDToContext[wid] = id
+            }
+            return existing
+        }
+    }
+
+    /// Remove and return the context for a wallpaperID UUID string.
+    func removeContext(wallpaperID: String) -> ActiveWallpaper? {
+        lock.withLock { state in
+            guard let contextId = state.wallpaperIDToContext.removeValue(forKey: wallpaperID) else { return nil }
+            return state.activeContexts.removeValue(forKey: contextId)
+        }
+    }
+
+    /// Execute a closure for each active renderer (snapshot copy under lock, iteration outside).
+    func forEachRenderer(_ body: (VideoRenderer) -> Void) {
+        let renderers = lock.withLock { state in
+            state.activeContexts.values.compactMap(\.renderer)
+        }
+        for renderer in renderers {
+            body(renderer)
+        }
+    }
+
+    /// Execute a closure for renderers on a specific display.
+    func forRenderers(displayID: UInt32, _ body: (VideoRenderer) -> Void) {
+        let renderers = lock.withLock { state in
+            state.activeContexts.values
+                .filter { $0.displayID == displayID }
+                .compactMap(\.renderer)
+        }
+        for renderer in renderers {
+            body(renderer)
+        }
+    }
+
+    /// All unique display IDs from active contexts.
+    func uniqueDisplayIDs() -> Set<UInt32> {
+        lock.withLock { state in
+            Set(state.activeContexts.values.compactMap(\.displayID))
+        }
+    }
+
+    /// Get active context info for each unique display.
+    func activeDisplayContexts() -> [(displayID: UInt32, videoID: String?)] {
+        lock.withLock { state in
+            var seen = Set<UInt32>()
+            var result: [(displayID: UInt32, videoID: String?)] = []
+            for ctx in state.activeContexts.values {
+                guard let did = ctx.displayID, seen.insert(did).inserted else { continue }
+                result.append((displayID: did, videoID: ctx.videoID))
+            }
+            return result
+        }
+    }
+
+    var activeContextCount: Int {
+        lock.withLock { $0.activeContexts.count }
+    }
+
+    /// Remove all contexts, stopping their renderers. Returns the removed contexts.
+    @discardableResult
+    func removeAllContexts() -> [ActiveWallpaper] {
+        let removed = lock.withLock { state -> [ActiveWallpaper] in
+            let all = Array(state.activeContexts.values)
+            state.activeContexts.removeAll()
+            state.wallpaperIDToContext.removeAll()
+            return all
+        }
+        for ctx in removed {
+            ctx.renderer?.stop()
+        }
+        return removed
+    }
+
+    // MARK: - Properties
+
+    var cachedThumbnailURL: URL? {
+        get { lock.withLock { $0.cachedThumbnailURL } }
+        set { lock.withLock { $0.cachedThumbnailURL = newValue } }
+    }
+
+    var cacheDirectoryURL: URL? {
+        get { lock.withLock { $0.cacheDirectoryURL } }
+        set { lock.withLock { $0.cacheDirectoryURL = newValue } }
+    }
+
+    var cachedVideoURL: URL? {
+        get { lock.withLock { $0.cachedVideoURL } }
+        set { lock.withLock { $0.cachedVideoURL = newValue } }
+    }
+
+    /// Currently selected video ID, persisted to UserDefaults.
+    var currentVideoID: String? {
+        get { lock.withLock { $0.currentVideoID } }
+        set {
+            lock.withLock { $0.currentVideoID = newValue }
+            UserDefaults.standard.set(newValue, forKey: WallpaperState.selectedVideoKey)
+        }
+    }
+
+    // MARK: - Display & Presentation State
+
+    /// Last known presentation mode from the framework's `update()` call.
+    var presentationMode: String {
+        get { lock.withLock { $0.presentationMode } }
+        set { lock.withLock { $0.presentationMode = newValue } }
+    }
+
+    /// Last known activity state from the framework's `update()` call.
+    var activityState: String {
+        get { lock.withLock { $0.activityState } }
+        set { lock.withLock { $0.activityState = newValue } }
+    }
+
+    /// Whether all displays are currently asleep.
+    var isDisplayAsleep: Bool {
+        get { lock.withLock { $0.isDisplayAsleep } }
+        set { lock.withLock { $0.isDisplayAsleep = newValue } }
+    }
+
+    /// Whether the screen is currently locked (lock screen showing).
+    /// Tracked via `com.apple.screenIsLocked` / `com.apple.screenIsUnlocked`
+    /// distributed notifications.
+    var isScreenLocked: Bool {
+        get { lock.withLock { $0.isScreenLocked } }
+        set { lock.withLock { $0.isScreenLocked = newValue } }
+    }
+}
