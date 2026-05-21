@@ -9,9 +9,9 @@ import CoreMedia
 import os
 import QuartzCore
 
-final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
+@objcMembers final class WallpaperXPCHandler: NSObject {
     /// Proxy to call methods on WallpaperAgent (ping, invalidateSnapshots, etc.)
-    var agentProxy: (any WallpaperExtensionProxyXPCProtocol)?
+    var agentProxy: (any PhospheneWallpaperExtensionProxyXPCProtocol)?
 
     // MARK: - Lifecycle
 
@@ -389,7 +389,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     // MARK: - Settings
 
-    func provideSettingsViewModels(withContentTypes _: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
+    func provideSettingsViewModels(withContentTypes types: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         extensionLog("=== PROVIDE SETTINGS VIEW MODELS ===")
 
         Task {

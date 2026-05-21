@@ -4,7 +4,7 @@ import os
 
 /// Reads/writes shared preferences to the extension container and signals via Darwin notification.
 ///
-/// The extension reads the same file on startup and when it receives `glass.kagerou.phosphene.prefsChanged`.
+/// The extension reads the same file on startup and when it receives `dev.phosphene.prefsChanged`.
 /// The extension writes a separate state file (`phosphene-state.json`) with `isActive`, which this service observes.
 @MainActor
 @Observable
@@ -72,7 +72,7 @@ final class WallpaperPrefsService {
 
     private static var extensionDocsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Containers/glass.kagerou.phosphene.extension/Data/Documents")
+            .appendingPathComponent("Library/Containers/dev.phosphene.extension/Data/Documents")
     }
 
     private static var prefsURL: URL {
@@ -173,7 +173,7 @@ final class WallpaperPrefsService {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterPostNotification(
             center,
-            CFNotificationName("glass.kagerou.phosphene.prefsChanged" as CFString),
+            CFNotificationName("dev.phosphene.prefsChanged" as CFString),
             nil,
             nil,
             true
@@ -209,7 +209,7 @@ final class WallpaperPrefsService {
                     WallpaperPrefsService.shared.loadState()
                 }
             },
-            "glass.kagerou.phosphene.stateChanged" as CFString,
+            "dev.phosphene.stateChanged" as CFString,
             nil,
             .deliverImmediately
         )
@@ -227,7 +227,7 @@ final class WallpaperPrefsService {
             .appendingPathComponent("Library/Preferences/com.apple.spaces.plist")
     }()
 
-    private static let extensionBundleID = "glass.kagerou.phosphene.extension"
+    private static let extensionBundleID = "dev.phosphene.extension"
 
     private func checkSystemWallpaper() {
         guard let data = try? Data(contentsOf: Self.wallpaperStoreURL),

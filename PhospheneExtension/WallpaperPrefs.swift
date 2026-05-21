@@ -4,7 +4,7 @@ import os
 /// Extension-side reader for shared preferences written by the main app,
 /// and writer for extension state (isActive) read by the app.
 ///
-/// Thread-safe via `OSAllocatedUnfairLock`. Observes `glass.kagerou.phosphene.prefsChanged`
+/// Thread-safe via `OSAllocatedUnfairLock`. Observes `dev.phosphene.prefsChanged`
 /// Darwin notification to reload when the app writes new values.
 final class WallpaperPrefs: @unchecked Sendable {
     static let shared = WallpaperPrefs()
@@ -148,7 +148,7 @@ final class WallpaperPrefs: @unchecked Sendable {
                 WallpaperPrefs.shared.reload()
                 WallpaperPrefs.shared.applyPauseState()
             },
-            "glass.kagerou.phosphene.prefsChanged" as CFString,
+            "dev.phosphene.prefsChanged" as CFString,
             nil,
             .deliverImmediately
         )
@@ -163,7 +163,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         CFNotificationCenterRemoveObserver(
             center,
             observer,
-            CFNotificationName("glass.kagerou.phosphene.prefsChanged" as CFString),
+            CFNotificationName("dev.phosphene.prefsChanged" as CFString),
             nil
         )
     }
@@ -220,7 +220,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterPostNotification(
             center,
-            CFNotificationName("glass.kagerou.phosphene.stateChanged" as CFString),
+            CFNotificationName("dev.phosphene.stateChanged" as CFString),
             nil,
             nil,
             true

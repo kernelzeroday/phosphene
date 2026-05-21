@@ -1,14 +1,11 @@
 import Foundation
 
 private let logURL: URL = {
-    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    return dir.appendingPathComponent("extension.log")
+    // Use caches directory which is sandbox-accessible
+    let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+    return dir.appendingPathComponent("phosphene-extension.log")
 }()
 
-/// Cached formatter — `ISO8601DateFormatter` is thread-safe with immutable config.
-/// `nonisolated(unsafe)` because ISO8601DateFormatter doesn't conform to Sendable,
-/// but it's effectively immutable after initialization (no properties are mutated).
 private nonisolated(unsafe) let logDateFormatter = ISO8601DateFormatter()
 
 /// Recursively dump an object's Mirror for debugging XPC types.
@@ -22,7 +19,6 @@ func dumpMirror(_ obj: Any, label: String = "root", depth: Int = 3, indent: Int 
         let childValue = child.value
         let desc = String(describing: childValue).prefix(200)
         extensionLog("\(prefix)  .\(childLabel) = \(desc)")
-        // Recurse into non-primitive types
         let childMirror = Mirror(reflecting: childValue)
         if childMirror.children.count > 0, !(childValue is String), !(childValue is Data), !(childValue is URL) {
             dumpMirror(childValue, label: childLabel, depth: depth - 1, indent: indent + 2)

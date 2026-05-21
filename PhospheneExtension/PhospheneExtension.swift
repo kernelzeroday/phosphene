@@ -1,15 +1,19 @@
-// Extension entry point.
+// Extension lifecycle and global state setup.
 //
 // Loads WallpaperExtensionKit via dlopen to register real XPC type classes,
 // then swizzles WallpaperSnapshotXPC's encode to bypass the exact NSXPCCoder check.
+//
+// NSExtensionMain handles registration with ExtensionFoundation.
 
 import AppKit
-import ExtensionFoundation
 import Foundation
 
-@main
-final class PhospheneExtension: NSObject, AppExtension {
-    override required init() {
+final class PhospheneExtension: NSObject {
+    /// Shared singleton — created by main.swift before setting up the XPC listener.
+    @MainActor
+    static let shared = PhospheneExtension()
+
+    override init() {
         super.init()
 
         let frameworkPath = "/System/Library/PrivateFrameworks/WallpaperExtensionKit.framework/WallpaperExtensionKit"
@@ -46,6 +50,7 @@ final class PhospheneExtension: NSObject, AppExtension {
             let err = String(cString: dlerror())
             extensionLog("INIT (PID: \(ProcessInfo.processInfo.processIdentifier)) — dlopen failed: \(err)")
         }
+        extensionLog("INIT complete for PID \(ProcessInfo.processInfo.processIdentifier)")
     }
 
     /// Swizzle WallpaperSnapshotXPC's encodeWithCoder: to bypass the exact NSXPCCoder class check.
@@ -107,13 +112,17 @@ final class PhospheneExtension: NSObject, AppExtension {
             object: nil, queue: .main
         ) { _ in
             WallpaperState.shared.isDisplayAsleep = false
-            Self.recomputeAndApplyPolicy()
+            MainActor.assumeIsolated {
+                Self.recomputeAndApplyPolicy()
+            }
             extensionLog("[Extension] Displays awake — recomputed policy (locked: \(WallpaperState.shared.isScreenLocked))")
 
             // Recompute again after a short delay to catch any pending
             // WallpaperAgent presentation mode updates that arrive after wake.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                Self.recomputeAndApplyPolicy()
+                MainActor.assumeIsolated {
+                    Self.recomputeAndApplyPolicy()
+                }
             }
         }
     }
@@ -136,7 +145,9 @@ final class PhospheneExtension: NSObject, AppExtension {
             object: nil, queue: .main
         ) { _ in
             WallpaperState.shared.isScreenLocked = false
-            Self.recomputeAndApplyPolicy()
+            MainActor.assumeIsolated {
+                Self.recomputeAndApplyPolicy()
+            }
             extensionLog("[Extension] Screen unlocked — recomputed policy")
         }
     }
@@ -180,13 +191,9 @@ final class PhospheneExtension: NSObject, AppExtension {
                 VideoLibrary.shared.scan()
                 extensionLog("[Extension] Library changed notification received, re-scanned")
             },
-            "glass.kagerou.phosphene.libraryChanged" as CFString,
+            "dev.phosphene.libraryChanged" as CFString,
             nil,
             .deliverImmediately,
         )
-    }
-
-    var configuration: some AppExtensionConfiguration {
-        WallpaperExtensionConfig()
     }
 }

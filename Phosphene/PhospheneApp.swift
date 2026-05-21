@@ -5,18 +5,7 @@ struct PhospheneApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var manager = PhospheneManager()
 
-    @Environment(\.openWindow) private var openWindow
-
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarPopoverView(manager: manager, openLibrary: {
-                showLibraryWindow()
-            })
-        } label: {
-            Image(systemName: "play.rectangle.fill")
-        }
-        .menuBarExtraStyle(.window)
-
         Window("Phosphene", id: "library") {
             LibraryWindow(manager: manager)
         }
@@ -33,45 +22,21 @@ struct PhospheneApp: App {
             SidebarCommands()
             InspectorCommands()
         }
+
+        Settings {
+            SettingsView(manager: manager)
+        }
     }
 
     private static let aboutCredits: NSAttributedString = {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
-
-        let attributes: [NSAttributedString.Key: Any] = [
+        return NSAttributedString(string: "Video wallpapers for macOS", attributes: [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: NSColor.secondaryLabelColor,
             .paragraphStyle: style,
-        ]
-
-        let string = NSMutableAttributedString()
-        string.append(NSAttributedString(string: "kagerou.glass", attributes: [
-            .font: NSFont.systemFont(ofSize: 11),
-            .link: URL(string: "https://kagerou.glass")!,
-            .paragraphStyle: style,
-        ]))
-        string.append(NSAttributedString(string: "  ·  ", attributes: attributes))
-        string.append(NSAttributedString(string: "@kageroumado", attributes: [
-            .font: NSFont.systemFont(ofSize: 11),
-            .link: URL(string: "https://x.com/kageroumado")!,
-            .paragraphStyle: style,
-        ]))
-        return string
+        ])
     }()
-
-    private func showLibraryWindow() {
-        NSApplication.shared.setActivationPolicy(.regular)
-        openWindow(id: "library")
-        DispatchQueue.main.async {
-            NSApplication.shared.activate()
-            for window in NSApplication.shared.windows
-            where window.identifier?.rawValue == "library" {
-                window.orderFrontRegardless()
-                window.makeKey()
-            }
-        }
-    }
 }
 
 // MARK: - URL Scheme Handling

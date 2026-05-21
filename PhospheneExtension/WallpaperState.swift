@@ -46,7 +46,7 @@ final class WallpaperState: Sendable {
                 let state = Unmanaged<WallpaperState>.fromOpaque(observer).takeUnretainedValue()
                 state.clearCaches()
             },
-            "glass.kagerou.phosphene.libraryChanged" as CFString,
+            "dev.phosphene.libraryChanged" as CFString,
             nil,
             .deliverImmediately
         )

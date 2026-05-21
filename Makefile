@@ -8,7 +8,7 @@ SWIFT     ?= swiftc
 CODESIGN  ?= codesign
 BUILD     ?= build
 
-IDENTIFIER  = glass.kagerou.phosphene
+IDENTIFIER  = dev.phosphene
 TEAM        = 52K336H235
 
 APP_NAME    = Phosphene
@@ -25,6 +25,7 @@ EXT_DIR     = $(EXT_NAME)
 
 APP_SRCS    = $(wildcard $(APP_DIR)/*.swift)
 EXT_SRCS    = $(wildcard $(EXT_DIR)/*.swift)
+EXT_C_SRCS  = $(wildcard $(EXT_DIR)/*.c) $(wildcard $(EXT_DIR)/*.m)
 
 SWIFT_FLAGS = \
 	-target $(TARGET) \
@@ -43,13 +44,20 @@ all: $(APP_BUNDLE)
 # PHOSPHENE EXTENSION (.appex embedded in app bundle)
 # ============================================================
 
-$(EXT_EXEC): $(EXT_SRCS)
+$(EXT_EXEC): $(EXT_SRCS) $(EXT_C_SRCS)
 	@mkdir -p $(EXT_BUNDLE)/Contents/MacOS $(EXT_BUNDLE)/Contents/Resources
 	$(SWIFT) $(SWIFT_FLAGS) \
 		-module-name $(EXT_NAME) \
 		-import-objc-header $(EXT_DIR)/WallpaperExtension-Bridging-Header.h \
+		-I Modules \
+		-F /System/Library/PrivateFrameworks \
+		-framework ExtensionFoundation \
+		-framework WallpaperExtensionKit \
+		-framework WallpaperFoundation \
+		-framework Wallpaper \
+		-framework WallpaperTypes \
 		-o $@ \
-		$(EXT_SRCS)
+		$(EXT_SRCS) $(EXT_C_SRCS)
 
 $(EXT_BUNDLE)/Contents/Info.plist: $(EXT_EXEC)
 	@mkdir -p $(@D)
@@ -82,6 +90,13 @@ $(EXT_BUNDLE)/Contents/Info.plist: $(EXT_EXEC)
 	  echo '	<dict>'; \
 	  echo '		<key>EXExtensionPointIdentifier</key>'; \
 	  echo '		<string>com.apple.wallpaper</string>'; \
+	  echo '	</dict>'; \
+	  echo '	<key>NSExtension</key>'; \
+	  echo '	<dict>'; \
+	  echo '		<key>NSExtensionPointIdentifier</key>'; \
+	  echo '		<string>com.apple.wallpaper</string>'; \
+	  echo '		<key>NSExtensionPrincipalClass</key>'; \
+	  echo '		<string>PhospheneExtension.PhospheneWallpaper</string>'; \
 	  echo '	</dict>'; \
 	  echo '</dict>'; \
 	  echo '</plist>'; \
@@ -129,8 +144,6 @@ $(APP_BUNDLE)/Contents/Info.plist: $(APP_EXEC)
 	  echo '	<string>1</string>'; \
 	  echo '	<key>LSMinimumSystemVersion</key>'; \
 	  echo '	<string>26.0</string>'; \
-	  echo '	<key>LSUIElement</key>'; \
-	  echo '	<true/>'; \
 	  echo '	<key>CFBundleURLTypes</key>'; \
 	  echo '	<array>'; \
 	  echo '		<dict>'; \
@@ -159,6 +172,8 @@ $(EXT_ENTITLEMENTS): | $(BUILD)
 	  echo '<plist version="1.0">'; \
 	  echo '<dict>'; \
 	  echo '	<key>com.apple.security.app-sandbox</key>'; \
+	  echo '	<true/>'; \
+	  echo '	<key>com.apple.security.cs.disable-library-validation</key>'; \
 	  echo '	<true/>'; \
 	  echo '	<key>com.apple.security.application-groups</key>'; \
 	  echo '	<array>'; \
@@ -208,6 +223,12 @@ install: $(APP_BUNDLE)
 	@rm -rf /Applications/$(APP_NAME).app
 	@cp -R $(APP_BUNDLE) /Applications/
 	@echo "Installed /Applications/$(APP_NAME).app"
+	# Also deploy extension to ~/Library/ExtensionKit/Extensions/ so
+	# WallpaperAgent can discover it via ExtensionFoundation.
+	@mkdir -p ~/Library/ExtensionKit/Extensions/
+	@rm -rf ~/Library/ExtensionKit/Extensions/$(EXT_NAME).appex
+	@cp -R $(EXT_BUNDLE) ~/Library/ExtensionKit/Extensions/
+	@echo "Installed extension to ~/Library/ExtensionKit/Extensions/"
 
 # ============================================================
 # CLEAN

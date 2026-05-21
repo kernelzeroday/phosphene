@@ -73,6 +73,7 @@ final class PhospheneManager {
         self.resumeLastWallpaper = defaults.bool(forKey: Keys.resumeLastWallpaper)
 
         Self.shared = self
+        VideoDeploymentService.migrateLegacyContainerIfNeeded()
         syncLaunchAtLogin()
 
         // Clear legacy bookmark if present

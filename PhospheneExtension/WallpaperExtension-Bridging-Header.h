@@ -25,52 +25,62 @@
 
 extern unsigned int CGSMainConnectionID(void);
 
-// MARK: - Extension → Host protocol (what we can call on WallpaperAgent)
+// MARK: - Extension Entry Points
 
-@protocol WallpaperExtensionProxyXPCProtocol <NSObject>
+// NSExtensionMain is the Foundation entry point for old-style NS extensions.
+FOUNDATION_EXPORT int NSExtensionMain(int argc, char *argv[]);
+
+// EXExtensionMain is the ExtensionFoundation entry point for ExtensionKit
+// extensions. On macOS 26, _start() reenters the binary's main() entry point;
+// detect reentry with ext_main_already_called() and enter dispatchMain().
+extern int EXExtensionMain(int argc, char *argv[]);
+
+// MARK: - C exit catcher (setjmp/longjmp helper)
+
+// Calls ext_main(argc, argv) while catching exit(0) via atexit + longjmp.
+// Returns 0 on normal return, 1 if exit(0) was caught.
+int catch_exit_and_call_ext_main(int (*ext_main)(int, char **), int argc, char *argv[]);
+
+// Reentrancy guard: returns 1 if set_ext_main_called() was called.
+int ext_main_already_called(void);
+void set_ext_main_called(void);
+
+// Install a SIGTRAP handler that skips brk instructions (arm64),
+// letting _start() continue past assertionFailure calls.
+void install_sigtrap_skip_handler(void);
+
+// MARK: - XPC protocols (Swift-visible declarations)
+//
+// Full protocol declarations live in WallpaperProtocols.h and are compiled
+// only by the ObjC compiler (via ProtocolRegistrar.m) so the runtime has
+// proper method-description metadata for NSXPCInterface.
+//
+// These duplicate declarations let Swift see the types for casting. They
+// use "Phosphene"-prefixed names to avoid colliding with Apple's framework.
+// MARK: - Identity helper (IdentityHelper.m)
+
+id _Nullable CreateExtensionIdentityFromBundle(NSError * _Nullable * _Nullable outError);
+void SetIvarAtOffset(id _Nonnull target, NSInteger offset, id _Nonnull value);
+void DumpIdentity(id _Nonnull identity);
+
+// MARK: - C-level XPC listener (XPCListenerHelper.m)
+
+// MARK: - syslog helper (os_log wrapper callable from Swift 6)
+
+#import <os/log.h>
+
+static inline void syslog_trace(NSString * _Nonnull msg) {
+    os_log(OS_LOG_DEFAULT, "%{public}@", msg);
+}
+
+// MARK: - XPC connection swizzle (XPCListenerHelper.m)
+
+void InstallXPCConnectionSwizzle(void (^ _Nonnull configureBlock)(NSXPCConnection * _Nonnull));
+void InstallShouldAcceptSwizzle(id _Nonnull delegate);
+
+@protocol PhospheneWallpaperExtensionProxyXPCProtocol <NSObject>
 - (void)pingWithId:(id _Nullable)anId;
 - (void)updateSettingsViewModels:(id _Nullable)models reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
 - (void)requestReadOnlyAccessTo:(id _Nullable)url reply:(void (^ _Nonnull)(id _Nullable))reply;
 - (void)invalidateSnapshotsWithReply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-@end
-
-// MARK: - Host → Extension protocol (what WallpaperAgent calls on us)
-
-@protocol WallpaperExtensionXPCProtocol <NSObject>
-
-// Lifecycle
-- (void)acquireWithId:(id _Nullable)anId request:(id _Nullable)request reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-- (void)updateWithId:(id _Nullable)anId request:(id _Nullable)request reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)invalidateWithId:(id _Nullable)anId reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)snapshotWithId:(id _Nullable)anId reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-
-// Settings
-- (void)provideSettingsViewModelsWithContentTypes:(id _Nullable)types reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-
-// Choices
-- (void)addChoiceRequestWithChoiceRequest:(id _Nullable)request onBehalfOfProcess:(id _Nullable)process reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-- (void)removeChoiceRequestWithChoiceRequest:(id _Nullable)request reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)selectedChoicesDidChangeFor:(id _Nullable)anId reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)invokeContextMenuActionWithMenuItemID:(id _Nullable)menuItemID groupItemID:(id _Nullable)groupItemID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-
-// Downloads
-- (void)isChoiceDownloadedWith:(id _Nullable)choiceID reply:(void (^ _Nonnull)(BOOL, NSError * _Nullable))reply;
-- (id _Nullable)downloadWithChoiceID:(id _Nullable)choiceID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)pauseDownloadFor:(id _Nullable)choiceID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)cancelDownloadFor:(id _Nullable)choiceID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)resumeDownloadFor:(id _Nullable)choiceID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)removeDownloadFor:(id _Nullable)choiceID reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-
-// Migration
-- (void)migrateSelectedChoiceFor:(id _Nullable)anId reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-- (void)migrateFrom:(id _Nullable)from to:(id _Nullable)to reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-
-// Shuffle
-- (void)skipShuffledContentWithId:(id _Nullable)anId reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-- (void)canSkipShuffledContentWithId:(id _Nullable)anId reply:(void (^ _Nonnull)(BOOL, NSError * _Nullable))reply;
-
-// Debug & notifications
-- (void)handleDebugRequestFor:(id _Nullable)request reply:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))reply;
-- (void)handleNotificationWithNamed:(id _Nullable)name reply:(void (^ _Nonnull)(NSError * _Nullable))reply;
-
 @end

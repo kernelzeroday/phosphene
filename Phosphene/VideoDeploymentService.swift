@@ -19,34 +19,73 @@ enum VideoDeploymentService {
     /// Extension container where the wallpaper extension looks for video files.
     private static var extensionDocsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Containers/glass.kagerou.phosphene.extension/Data/Documents")
+            .appendingPathComponent("Library/Containers/dev.phosphene.extension/Data/Documents")
+    }
+
+    private static let legacyContainerURL: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Containers/glass.kagerou.phosphene.extension/Data/Documents")
+
+    static func migrateLegacyContainerIfNeeded() {
+        let fm = FileManager.default
+        let oldVideos = legacyContainerURL.appendingPathComponent("videos")
+        let newVideos = extensionDocsURL.appendingPathComponent("videos")
+        guard fm.fileExists(atPath: oldVideos.path) else { return }
+        let oldEntries = (try? fm.contentsOfDirectory(atPath: oldVideos.path)) ?? []
+        let newEntries = (try? fm.contentsOfDirectory(atPath: newVideos.path)) ?? []
+        guard !oldEntries.isEmpty, newEntries.isEmpty else { return }
+        try? fm.createDirectory(at: extensionDocsURL, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: newVideos.path) {
+            try? fm.removeItem(at: newVideos)
+        }
+        try? fm.copyItem(at: oldVideos, to: newVideos)
+        let oldPrefs = legacyContainerURL.appendingPathComponent("phosphene-prefs.json")
+        let newPrefs = extensionDocsURL.appendingPathComponent("phosphene-prefs.json")
+        if fm.fileExists(atPath: oldPrefs.path), !fm.fileExists(atPath: newPrefs.path) {
+            try? fm.copyItem(at: oldPrefs, to: newPrefs)
+        }
+        Log.general.info("Migrated legacy container data to new bundle ID")
     }
 
     /// Copy a video file into the extension's VideoLibrary folder structure.
     /// Creates `Documents/videos/<uuid>/video.<ext>` + metadata.json.
-    /// Probes the video with AVFoundation to populate resolution, fps, and duration.
+    /// Automatically transcodes VP9/AV1 and other non-H.264/HEVC codecs to
+    /// H.264 via ffmpeg, since the sandboxed extension can't decode them.
     /// Skips deployment if a video with the same filename already exists.
-    /// Sends a Darwin notification so the extension re-scans its library.
     @MainActor
     static func deployVideo(url: URL, name: String? = nil) async {
         let fileManager = FileManager.default
         let videosDir = extensionDocsURL.appendingPathComponent("videos")
         try? fileManager.createDirectory(at: videosDir, withIntermediateDirectories: true)
 
-        // Dedup: skip if a video with the same filename already exists in the library
         let existing = listEntries()
         if existing.contains(where: { $0.filename == url.lastPathComponent }) {
             Log.video.info("Video '\(url.lastPathComponent)' already in library, skipping deploy")
             return
         }
 
+        var sourceURL = url
+        var tempTranscode: URL?
+
+        if await needsTranscode(url) {
+            Log.video.info("Video uses unsupported codec — transcoding to H.264")
+            if let transcoded = await transcodeToH264(url) {
+                tempTranscode = transcoded
+                sourceURL = transcoded
+            } else {
+                Log.video.error("Transcode failed, deploying original (may not play in extension)")
+            }
+        }
+
         let id = UUID().uuidString
         let dir = videosDir.appendingPathComponent(id)
+        let deployFilename = sourceURL == url
+            ? url.lastPathComponent
+            : url.deletingPathExtension().lastPathComponent + ".mp4"
 
         do {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-            let destURL = dir.appendingPathComponent(url.lastPathComponent)
-            try fileManager.copyItem(at: url, to: destURL)
+            let destURL = dir.appendingPathComponent(deployFilename)
+            try fileManager.copyItem(at: sourceURL, to: destURL)
 
             var fps: Double = 0
             var resolution: CGSize = .zero
@@ -63,7 +102,7 @@ enum VideoDeploymentService {
             let metadata = DeploymentMetadata(
                 id: id,
                 name: name ?? url.deletingPathExtension().lastPathComponent,
-                filename: url.lastPathComponent,
+                filename: deployFilename,
                 duration: duration,
                 fps: fps,
                 resolution: resolution,
@@ -74,11 +113,15 @@ enum VideoDeploymentService {
 
             generateThumbnail(for: destURL, in: dir)
 
-            Log.video.info("Deployed video '\(url.lastPathComponent)' as \(id) to \(dir.path)")
+            Log.video.info("Deployed video '\(deployFilename)' as \(id)")
             notifyExtensionLibraryChanged()
         } catch {
             Log.video.error("Failed to deploy video: \(error.localizedDescription)")
             try? fileManager.removeItem(at: dir)
+        }
+
+        if let temp = tempTranscode {
+            try? fileManager.removeItem(at: temp)
         }
     }
 
@@ -280,7 +323,64 @@ enum VideoDeploymentService {
     }
 
     /// Notification posted in-process when the library changes.
-    static let libraryChangedNotification = Notification.Name("glass.kagerou.phosphene.libraryChanged")
+    static let libraryChangedNotification = Notification.Name("dev.phosphene.libraryChanged")
+
+    private static func needsTranscode(_ url: URL) async -> Bool {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let descriptions = try? await track.load(.formatDescriptions) as [CMFormatDescription]
+        else { return false }
+        for desc in descriptions {
+            let subType = CMFormatDescriptionGetMediaSubType(desc)
+            if subType == kCMVideoCodecType_H264
+                || subType == kCMVideoCodecType_HEVC
+                || subType == kCMVideoCodecType_HEVCWithAlpha {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func transcodeToH264(_ url: URL) async -> URL? {
+        let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        guard let ffmpeg = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            Log.video.error("ffmpeg not found — cannot transcode")
+            return nil
+        }
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transcode_\(UUID().uuidString).mp4")
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: ffmpeg)
+                process.arguments = [
+                    "-i", url.path,
+                    "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart",
+                    "-y", outputURL.path,
+                ]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    if process.terminationStatus == 0 {
+                        continuation.resume(returning: outputURL)
+                    } else {
+                        Log.video.error("ffmpeg exited with status \(process.terminationStatus)")
+                        continuation.resume(returning: nil)
+                    }
+                } catch {
+                    Log.video.error("ffmpeg launch error: \(error)")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
 
     /// Generate a thumbnail.jpg from the first frame of a video.
     private static func generateThumbnail(for videoURL: URL, in directory: URL) {
@@ -303,7 +403,7 @@ enum VideoDeploymentService {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterPostNotification(
             center,
-            CFNotificationName("glass.kagerou.phosphene.libraryChanged" as CFString),
+            CFNotificationName("dev.phosphene.libraryChanged" as CFString),
             nil,
             nil,
             true

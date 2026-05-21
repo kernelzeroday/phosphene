@@ -10,7 +10,7 @@ import Foundation
 /// Build a fully-populated WallpaperSettingsViewModelsXPC using Codable shims.
 /// Creates one SettingsItem per video in the library.
 func buildSettingsViewModelsXPC() async -> AnyObject? {
-    let bundleID = Bundle.main.bundleIdentifier ?? "glass.kagerou.phosphene.extension"
+    let bundleID = Bundle.main.bundleIdentifier ?? "dev.phosphene.extension"
     let library = VideoLibrary.shared
     let groupID = GroupID(id: "video-wallpapers")
 
@@ -33,8 +33,12 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
             ),
         )
 
-        // Generate thumbnail — skip entry if extraction fails
-        guard let thumbnailURL = await library.generateThumbnail(for: entry) else {
+        let thumbnailURL: URL
+        if let generated = await library.generateThumbnail(for: entry) {
+            thumbnailURL = generated
+        } else if let placeholder = generatePlaceholderThumbnail(for: entry.id) {
+            thumbnailURL = placeholder
+        } else {
             continue
         }
 
@@ -86,6 +90,7 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
         screenSaver: nil,
     )
 
+    extensionLog("  [Settings] \(items.count) item(s) in \(entries.count) entries")
     return remapToRealXPC(viewModels)
 }
 
@@ -100,6 +105,38 @@ func makeEmptyGroupsResponse() -> AnyObject? {
         screenSaver: nil,
     )
     return remapToRealXPC(emptyViewModels)
+}
+
+private func generatePlaceholderThumbnail(for entryID: String) -> URL? {
+    let docs = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents")
+    let dir = docs.appendingPathComponent("videos").appendingPathComponent(entryID)
+    let url = dir.appendingPathComponent("thumbnail.jpg")
+
+    if FileManager.default.fileExists(atPath: url.path) { return url }
+
+    let size = CGSize(width: 480, height: 270)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let ctx = CGContext(
+        data: nil, width: Int(size.width), height: Int(size.height),
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+    ) else { return nil }
+
+    let gradient = CGGradient(colorsSpace: colorSpace, colors: [
+        CGColor(red: 0.15, green: 0.0, blue: 0.35, alpha: 1),
+        CGColor(red: 0.0, green: 0.2, blue: 0.5, alpha: 1),
+    ] as CFArray, locations: [0, 1])!
+    ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+
+    guard let image = ctx.makeImage(),
+          let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+    guard CGImageDestinationFinalize(dest) else { return nil }
+
+    extensionLog("  [Settings] Generated placeholder thumbnail for \(entryID)")
+    return url
 }
 
 /// Archive via ShimViewModelsXPC, remap class name on unarchive to the real XPC type.

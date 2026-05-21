@@ -26,6 +26,15 @@ struct LibraryWindow: View {
             }
             .navigationTitle("Phosphene")
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        manager.openVideoChooser()
+                    } label: {
+                        Label("Add Video", systemImage: "plus")
+                    }
+                    .help("Add video to library")
+                }
+
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showInspector.toggle()
@@ -40,11 +49,6 @@ struct LibraryWindow: View {
                 NotificationCenter.default.publisher(for: VideoDeploymentService.libraryChangedNotification)
             ) { _ in
                 loadEntries()
-            }
-            .onDisappear {
-                if NSApplication.shared.windows.filter({ $0.isVisible && $0.level == .normal }).isEmpty {
-                    NSApplication.shared.setActivationPolicy(.accessory)
-                }
             }
     }
 
