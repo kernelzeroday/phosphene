@@ -112,6 +112,7 @@ $(EXT_BUNDLE): $(EXT_BUNDLE)/Contents/Info.plist
 
 $(APP_EXEC): $(APP_SRCS)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
+	@cp -f Phosphene.icns $(APP_BUNDLE)/Contents/Resources/Phosphene.icns
 	$(SWIFT) $(SWIFT_FLAGS) \
 		-module-name $(APP_NAME) \
 		-o $@ \
@@ -130,6 +131,8 @@ $(APP_BUNDLE)/Contents/Info.plist: $(APP_EXEC)
 	  echo '	<string>Phosphene</string>'; \
 	  echo '	<key>CFBundleExecutable</key>'; \
 	  echo '	<string>$(APP_NAME)</string>'; \
+	  echo '	<key>CFBundleIconFile</key>'; \
+	  echo '	<string>Phosphene</string>'; \
 	  echo '	<key>CFBundleIdentifier</key>'; \
 	  echo '	<string>$(IDENTIFIER)</string>'; \
 	  echo '	<key>CFBundleInfoDictionaryVersion</key>'; \
