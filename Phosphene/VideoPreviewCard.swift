@@ -182,8 +182,3 @@ struct PlayerLayerView: NSViewRepresentable {
         var playerLayer: AVPlayerLayer?
     }
 }
-
-#Preview {
-    VideoPreviewCard(videoURL: nil)
-        .frame(width: 320)
-}

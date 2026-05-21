@@ -231,7 +231,7 @@ final class WallpaperPrefsService {
 
     private func checkSystemWallpaper() {
         guard let data = try? Data(contentsOf: Self.wallpaperStoreURL),
-              let plist = try? unsafe PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             selections = []
             return
         }
@@ -364,7 +364,7 @@ final class WallpaperPrefsService {
 
     private func resolveSpaceMap() -> [String: String] {
         guard let data = try? Data(contentsOf: Self.spacesConfigURL),
-              let plist = try? unsafe PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let config = plist["SpacesDisplayConfiguration"] as? [String: Any],
               let mgmt = config["Management Data"] as? [String: Any],
               let monitors = mgmt["Monitors"] as? [[String: Any]] else {

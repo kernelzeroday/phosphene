@@ -171,7 +171,7 @@ final class PowerMonitor: Sendable {
     /// Returns the built-in backlight brightness in 0.0–1.0, or nil if there is
     /// no backlit display attached.
     private static func readBuiltInBrightness() -> Float? {
-        let matching = unsafe IOServiceMatching("AppleBacklightDisplay")
+        let matching = IOServiceMatching("AppleBacklightDisplay")
         var iter: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS else {
             return nil
@@ -181,13 +181,13 @@ final class PowerMonitor: Sendable {
         var brightness: Float?
         while case let service = IOIteratorNext(iter), service != IO_OBJECT_NULL {
             defer { IOObjectRelease(service) }
-            guard let propsRef = unsafe IORegistryEntryCreateCFProperty(
+            guard let propsRef = IORegistryEntryCreateCFProperty(
                 service,
                 "IODisplayParameters" as CFString,
                 kCFAllocatorDefault,
                 0,
             ) else { continue }
-            guard let params = unsafe propsRef.takeRetainedValue() as? [String: Any],
+            guard let params = propsRef.takeRetainedValue() as? [String: Any],
                   let brightnessParam = params["brightness"] as? [String: Any],
                   let value = brightnessParam["value"] as? Int,
                   let min = brightnessParam["min"] as? Int,

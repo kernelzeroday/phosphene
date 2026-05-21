@@ -356,8 +356,3 @@ private struct PopoverMenuItemStyle: ButtonStyle {
         }
     }
 }
-
-#Preview {
-    MenuBarPopoverView(manager: PhospheneManager())
-        .frame(width: 320)
-}
