@@ -19,7 +19,7 @@ This is a substantially rewritten fork. The original codebase had a broken XPC p
 
 ### What we rewrote
 
-- **Build system.** Ripped out the Xcode project dependency entirely. A single `Makefile` compiles both the app and extension using `swiftc` from Command Line Tools. `make && make install` — that's it. The xcodeproj is still in the repo for anyone who wants it, but it's not needed.
+- **Build system.** Ripped out Xcode entirely. A single `Makefile` compiles both the app and extension using `swiftc` from Command Line Tools. `make && make install` — that's it. No xcodeproj, no asset catalogs, no build settings UI.
 - **App architecture.** Converted from a menu bar accessory app to a normal windowed application. The menu bar icon was bad UI — it added clutter for no reason. Phosphene now launches as a regular app with a library window front and center, a toolbar, and a proper Settings pane (Cmd+,).
 - **Extension entry point.** Completely new `main.swift` with reentry detection (`exit_catcher.c`), vtable patching for `shouldAcceptNewConnection`, init swizzling to capture the `_EXRunningExtension` singleton, and identity pre-seeding. None of this existed in the original.
 - **Branding.** Removed all `glass.kagerou.phosphene` identifiers and replaced with `dev.phosphene`. Removed attribution links. Added automatic migration of video data from the old container path.
